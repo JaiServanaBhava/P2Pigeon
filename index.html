@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>🐦 Pigeon Post — Globe (Offline Edition)</title>
+<title>🐦 Pigeon Post — Globe (Real Earth Edition)</title>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 // Fallback CDN for PeerJS if unpkg is blocked
@@ -11,6 +11,7 @@ if (typeof Peer === "undefined") {
   document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"><\/script>');
 }
 </script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;height:100dvh;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;background:#050810;color:#e6edf3}
@@ -70,7 +71,7 @@ if (typeof Peer === "undefined") {
 </head>
 <body>
 <div id="globe"><canvas id="cv"></canvas></div>
-<div id="hint">🖱️ Drag to spin · scroll/pinch to zoom · tap land to pin your loft</div>
+<div id="hint">🖱️ Drag to spin (flick it — it keeps going) · scroll/pinch to zoom · tap land to pin your loft</div>
 <div id="zoomCtl">
   <button id="zoomIn">＋</button>
   <button id="zoomOut">－</button>
@@ -78,8 +79,8 @@ if (typeof Peer === "undefined") {
 <div id="burger" onclick="document.getElementById('panel').classList.toggle('closed')">☰</div>
 
 <div id="panel" class="closed">
-  <h1>🐦 Pigeon Post <span class="lanbadge">OFFLINE GLOBE</span></h1>
-  <div class="sub">Zero dependencies for the map · nothing stored on any server</div>
+  <h1>🐦 Pigeon Post <span class="lanbadge">REAL EARTH</span></h1>
+  <div class="sub">Real satellite Earth imagery (WebGL) · identity &amp; messages never touch a server</div>
 
   <div class="card" id="regCard">
     <b><span class="stepnum">1</span>Register (saved only on YOUR device)</b>
@@ -163,150 +164,93 @@ if (typeof Peer === "undefined") {
 
 <script>
 /* =====================================================================
-   PIGEON POST — OFFLINE EDITION
-   Globe methodology: pure 2D-canvas orthographic projection.
-   NO Three.js, NO WebGL, NO downloaded images. The Earth texture is
-   procedurally painted from built-in coastline data, so the globe
-   ALWAYS renders instantly, even with zero internet. PeerJS (CDN) is
-   only used for the optional P2P messaging layer.
+   PIGEON POST — REAL EARTH / WEBGL EDITION
+   Globe methodology: three.js WebGL sphere with real NASA Blue Marble
+   satellite imagery (streamed from a texture CDN), bump + specular maps,
+   a Fresnel atmosphere glow, and a starfield. Rendering runs on the GPU,
+   so dragging/zooming stays smooth and light on battery on phones too —
+   no more per-pixel JS rasterizing every frame.
+   PeerJS (CDN) is only used for the optional P2P messaging layer; your
+   identity, location and messages never touch a server either way.
 ===================================================================== */
 
-/* ---------------- EARTH TEXTURE (procedural, built-in data) ---------------- */
-const TEX_W = 1024, TEX_H = 512;
-function proj(lat,lng){ return { x:(lng+180)/360*TEX_W, y:(90-lat)/180*TEX_H }; }
-
-const CONTINENTS = [
- {color:'#3a6b3a',pts:[[71,-156],[70,-141],[69,-125],[60,-95],[58,-78],[62,-65],[55,-60],[47,-52],[45,-60],[40,-74],[32,-80],[25,-82],[25,-97],[18,-95],[16,-92],[14,-83],[9,-79],[7,-77],[9,-82],[15,-92],[20,-105],[24,-110],[30,-115],[32,-117],[38,-123],[48,-124],[55,-130],[60,-140],[65,-150]]},
- {color:'#2e6b33',pts:[[12,-72],[11,-74],[8,-77],[1,-79],[-4,-81],[-14,-76],[-18,-70],[-23,-70],[-33,-72],[-42,-73],[-52,-70],[-55,-68],[-52,-65],[-45,-65],[-38,-58],[-33,-53],[-23,-43],[-13,-38],[-5,-35],[0,-50],[3,-60],[5,-67],[8,-72]]},
- {color:'#7a6a3a',pts:[[37,10],[32,-5],[21,-17],[15,-17],[4,-8],[-2,9],[-4,13],[-15,12],[-22,14],[-28,16],[-34,19],[-34,26],[-25,33],[-15,40],[-5,40],[2,45],[8,49],[12,43],[15,39],[18,38],[22,36],[31,32],[33,25]]},
- {color:'#4a7a4a',pts:[[71,25],[70,28],[65,35],[60,30],[55,38],[50,40],[45,38],[42,29],[40,20],[38,15],[41,12],[44,8],[43,3],[40,-4],[36,-6],[38,-9],[43,-9],[46,-1],[49,-2],[51,2],[53,7],[55,8],[58,10],[60,5],[63,10],[66,13],[70,20]]},
- {color:'#5c6b3a',pts:[[77,105],[75,90],[70,60],[68,40],[60,45],[55,50],[45,50],[40,48],[35,50],[25,60],[15,45],[12,43],[10,50],[8,77],[8,80],[12,80],[16,82],[20,87],[22,92],[16,97],[10,105],[5,105],[1,104],[0,109],[5,115],[15,109],[22,113],[28,120],[32,122],[35,126],[38,128],[40,132],[44,135],[52,140],[60,160],[65,170],[70,160],[73,140]]},
- {color:'#8a5a3a',pts:[[-11,131],[-12,136],[-15,141],[-17,146],[-20,149],[-25,153],[-32,153],[-35,150],[-38,147],[-38,142],[-35,137],[-32,133],[-31,128],[-26,113],[-20,114],[-16,123],[-13,127]]},
- {color:'#c9d3d6',pts:[[83,-30],[78,-20],[70,-25],[65,-40],[60,-45],[65,-53],[72,-55],[78,-65],[82,-50]]},
- {color:'#6b7a3a',pts:[[-12,50],[-16,50],[-20,47],[-25,45],[-25,43],[-20,44],[-15,46],[-12,49]]},
- {color:'#4a7a4a',pts:[[59,-3],[58,-6],[54,-8],[52,-10],[51,-5],[50,-4],[51,1],[53,0],[56,-2],[58,-3]]},
- {color:'#5c6b3a',pts:[[45,142],[43,145],[40,142],[36,141],[34,135],[33,131],[35,133],[38,138],[41,140]]},
- {color:'#3a6b3a',pts:[[-34,173],[-38,178],[-41,175],[-45,167],[-47,168],[-44,171],[-40,173]]},
- {color:'#3a6b33',pts:[[7,116],[4,119],[-2,117],[-4,114],[-2,109],[2,109],[5,113]]},
- {color:'#3a6b33',pts:[[6,96],[2,97],[-2,101],[-5,104],[-3,106],[1,103],[5,98]]},
- {color:'#3a6b33',pts:[[-2,132],[-4,141],[-8,143],[-9,148],[-6,150],[-2,138],[0,134]]},
- {color:'#8a6a3a',pts:[[30,48],[28,34],[23,37],[16,43],[13,44],[12,49],[16,53],[20,58],[24,56],[28,50]]},
- {color:'#5c6b3a',pts:[[66,-22],[65,-14],[64,-17],[63,-21],[65,-24]]},
- {color:'#3a6b33',pts:[[23,-82],[22,-77],[20,-75],[19,-77],[20,-82]]},
- {color:'#3a6b33',pts:[[19,121],[15,120],[10,122],[7,125],[10,126],[15,122]]},
- {color:'#3a6b33',pts:[[9,80],[7,82],[6,80],[8,79]]},
-];
-const RIDGES = [
- [[10,-75],[-5,-77],[-15,-72],[-25,-68],[-35,-70],[-45,-72]],
- [[60,-140],[52,-122],[42,-112],[34,-108]],
- [[35,75],[30,82],[28,88],[27,95]],
- [[46,7],[46,10],[45,13]],
-];
-
-function smoothPath(pts){
-  const p = pts.map(function(pt){ return proj(pt[0],pt[1]); });
-  const path = new Path2D();
-  const m0x=(p[0].x+p[p.length-1].x)/2, m0y=(p[0].y+p[p.length-1].y)/2;
-  path.moveTo(m0x,m0y);
-  for(let i=0;i<p.length;i++){
-    const c=p[i], n=p[(i+1)%p.length];
-    path.quadraticCurveTo(c.x,c.y,(c.x+n.x)/2,(c.y+n.y)/2);
-  }
-  path.closePath();
-  return path;
-}
-
-function buildEarthCanvas(){
-  const cv=document.createElement('canvas'); cv.width=TEX_W; cv.height=TEX_H;
-  const ctx=cv.getContext('2d');
-
-  const oceanGrad=ctx.createLinearGradient(0,0,0,TEX_H);
-  oceanGrad.addColorStop(0,'#0b1f3a');
-  oceanGrad.addColorStop(0.5,'#0e5a86');
-  oceanGrad.addColorStop(1,'#0b1f3a');
-  ctx.fillStyle=oceanGrad; ctx.fillRect(0,0,TEX_W,TEX_H);
-
-  for(let i=0;i<7000;i++){
-    ctx.fillStyle='rgba(255,255,255,'+(Math.random()*0.02).toFixed(3)+')';
-    ctx.fillRect(Math.random()*TEX_W,Math.random()*TEX_H,2,2);
-  }
-
-  const landUnion=new Path2D();
-  CONTINENTS.forEach(function(c){
-    const path=smoothPath(c.pts);
-    ctx.fillStyle=c.color; ctx.fill(path);
-    ctx.save(); ctx.clip(path);
-    let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
-    c.pts.forEach(function(pt){ const pr=proj(pt[0],pt[1]);
-      minx=Math.min(minx,pr.x);maxx=Math.max(maxx,pr.x);miny=Math.min(miny,pr.y);maxy=Math.max(maxy,pr.y); });
-    const cx0=(minx+maxx)/2, cy0=(miny+maxy)/2;
-    const rad=Math.max(maxx-minx,maxy-miny)/1.3;
-    const shade=ctx.createRadialGradient(cx0,cy0,10,cx0,cy0,rad);
-    shade.addColorStop(0,'rgba(255,255,255,0.10)');
-    shade.addColorStop(1,'rgba(0,0,0,0.18)');
-    ctx.fillStyle=shade; ctx.fillRect(minx-5,miny-5,maxx-minx+10,maxy-miny+10);
-    for(let i=0;i<700;i++){
-      const x=minx+Math.random()*(maxx-minx), y=miny+Math.random()*(maxy-miny);
-      ctx.fillStyle='rgba('+(Math.random()>0.5?'255,255,255':'0,0,0')+','+(Math.random()*0.06).toFixed(3)+')';
-      ctx.fillRect(x,y,3,3);
-    }
-    ctx.restore();
-    landUnion.addPath(path);
-  });
-
-  CONTINENTS.forEach(function(c){
-    ctx.strokeStyle='rgba(10,20,15,0.5)'; ctx.lineWidth=1.4;
-    ctx.stroke(smoothPath(c.pts));
-  });
-
-  ctx.save(); ctx.clip(landUnion);
-  const amz=proj(-3,-62);
-  ctx.fillStyle='rgba(10,60,10,0.18)';
-  ctx.beginPath(); ctx.ellipse(amz.x,amz.y,140,90,0,0,Math.PI*2); ctx.fill();
-  const sah=proj(23,15);
-  ctx.fillStyle='rgba(200,170,90,0.28)';
-  ctx.beginPath(); ctx.ellipse(sah.x,sah.y,260,110,0,0,Math.PI*2); ctx.fill();
-  RIDGES.forEach(function(r){
-    ctx.strokeStyle='rgba(120,90,55,0.55)'; ctx.lineWidth=6; ctx.lineCap='round';
-    ctx.beginPath();
-    r.forEach(function(pt,i){ const pr=proj(pt[0],pt[1]); if(i===0)ctx.moveTo(pr.x,pr.y); else ctx.lineTo(pr.x,pr.y); });
-    ctx.stroke();
-    ctx.strokeStyle='rgba(255,255,255,0.20)'; ctx.lineWidth=2; ctx.stroke();
-  });
-  ctx.restore();
-
-  const iceN=ctx.createLinearGradient(0,0,0,TEX_H*0.10);
-  iceN.addColorStop(0,'rgba(240,248,255,0.95)'); iceN.addColorStop(1,'rgba(240,248,255,0)');
-  ctx.fillStyle=iceN; ctx.fillRect(0,0,TEX_W,TEX_H*0.11);
-  const iceS=ctx.createLinearGradient(0,TEX_H*0.86,0,TEX_H);
-  iceS.addColorStop(0,'rgba(240,248,255,0)'); iceS.addColorStop(1,'rgba(240,248,255,0.97)');
-  ctx.fillStyle=iceS; ctx.fillRect(0,TEX_H*0.83,TEX_W,TEX_H*0.17);
-
-  ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=1;
-  for(let i=0;i<=24;i++){ ctx.beginPath(); ctx.moveTo(i*TEX_W/24,0); ctx.lineTo(i*TEX_W/24,TEX_H); ctx.stroke(); }
-  for(let i=0;i<=12;i++){ ctx.beginPath(); ctx.moveTo(0,i*TEX_H/12); ctx.lineTo(TEX_W,i*TEX_H/12); ctx.stroke(); }
-
-  return cv;
-}
-
-const texCanvas = buildEarthCanvas();
-const texData = texCanvas.getContext('2d').getImageData(0,0,TEX_W,TEX_H).data;
-
-/* ---------------- 2D ORTHOGRAPHIC GLOBE ENGINE ---------------- */
+const EARTH_R = 1;
 const globeDiv = document.getElementById('globe');
 const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
 const isMobile = innerWidth<=768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-let W=0, H=0, DPR=1;
+let W=innerWidth, H=innerHeight;
 let yaw=0.7, pitch=0.35, zoom=1;
 let targetYaw=null, targetPitch=null, targetZoom=null;
+let velYaw=0, velPitch=0;
 let dragging=false, prevX=0, prevY=0, downX=0, downY=0;
-let stars=[];
-const globeLayer=document.createElement('canvas');
-const gctx=globeLayer.getContext('2d');
-let layerDirty=true, layerKey='';
+let sceneDirty=true;
 
+/* ---------------- three.js scene ---------------- */
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+renderer.setClearColor(0x050810, 1);
+
+scene.add(new THREE.AmbientLight(0x44536b, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.55);
+sun.position.set(5, 3, 6);
+scene.add(sun);
+
+function makeFallbackTexture(){
+  const c=document.createElement('canvas'); c.width=512; c.height=256;
+  const fx=c.getContext('2d');
+  const g=fx.createLinearGradient(0,0,0,256);
+  g.addColorStop(0,'#0b1f3a'); g.addColorStop(0.5,'#0e6a96'); g.addColorStop(1,'#0b1f3a');
+  fx.fillStyle=g; fx.fillRect(0,0,512,256);
+  return new THREE.CanvasTexture(c);
+}
+const earthMat = new THREE.MeshPhongMaterial({ map: makeFallbackTexture(), shininess: 14, specular: 0x223344 });
+const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(EARTH_R, isMobile?48:64, isMobile?48:64), earthMat);
+scene.add(earthMesh);
+
+const atmoMat = new THREE.ShaderMaterial({
+  vertexShader: 'varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'varying vec3 vN; void main(){ float i=pow(0.64-dot(vN,vec3(0.0,0.0,1.0)),3.0); gl_FragColor=vec4(0.35,0.62,1.0,1.0)*i; }',
+  blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(EARTH_R*1.14, 64, 64), atmoMat));
+
+(function buildStars(){
+  const n = isMobile?700:1400;
+  const pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const r=40+Math.random()*40, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.cos(ph); pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({color:0xffffff,size:0.45,transparent:true,opacity:0.85,sizeAttenuation:true})));
+})();
+
+const texLoader = new THREE.TextureLoader();
+texLoader.setCrossOrigin('anonymous');
+texLoader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg', function(tex){
+  earthMat.map = tex; earthMat.needsUpdate = true;
+  if (typeof log === 'function') log('🛰️ Real satellite imagery loaded (NASA Blue Marble).');
+}, undefined, function(){
+  if (typeof log === 'function') log('⚠️ Satellite imagery blocked by your network — using an offline placeholder ocean texture. The map still fully works.');
+});
+texLoader.load('https://unpkg.com/three-globe/example/img/earth-topology.png', function(tex){ earthMat.bumpMap=tex; earthMat.bumpScale=0.02; earthMat.needsUpdate=true; });
+texLoader.load('https://unpkg.com/three-globe/example/img/earth-water.png', function(tex){ earthMat.specularMap=tex; earthMat.needsUpdate=true; });
+
+function fit(){
+  W=innerWidth; H=innerHeight;
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  renderer.setSize(W,H);
+  camera.aspect=W/H; camera.updateProjectionMatrix();
+}
+addEventListener('resize',fit);
+addEventListener('orientationchange',function(){ fit(); setTimeout(fit,300); setTimeout(fit,800); });
+if(window.visualViewport) visualViewport.addEventListener('resize',fit);
+fit();
+
+/* ---------------- lat/lng <-> 3D vector (matches three.js's default sphere UV mapping) ---------------- */
 function ll2v(lat,lng){
   const phi=(90-lat)*Math.PI/180, th=(lng+180)*Math.PI/180;
   return { x:-Math.sin(phi)*Math.cos(th), y:Math.cos(phi), z:Math.sin(phi)*Math.sin(th) };
@@ -318,96 +262,80 @@ function v2ll(v){
   lng=((lng+540)%360)-180;
   return {lat:lat,lng:lng};
 }
-// local(camera) -> world : Rx(pitch) then Ry(yaw)
-function toWorld(x,y,z,cP,sP,cY,sY){
-  const y1=y*cP - z*sP, z1=y*sP + z*cP;
-  return { x:x*cY + z1*sY, y:y1, z:-x*sY + z1*cY };
-}
-// world -> local : Ry(-yaw) then Rx(-pitch)
-function toLocal(x,y,z,cP,sP,cY,sY){
-  const x1=x*cY - z*sY, z1=x*sY + z*cY;
-  return { x:x1, y:y*cP + z1*sP, z:-y*sP + z1*cP };
-}
-function cx(){ return W/2; }
-function cy0(){ return H/2; }
-function R(){ return Math.min(W,H)*0.42*zoom; }
+function dAng(a,b){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
 
-function fit(){
-  DPR=Math.min(devicePixelRatio||1, 1.5);
-  W=innerWidth; H=innerHeight;
-  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
-  cv.style.width=W+'px'; cv.style.height=H+'px';
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-  stars=[];
-  for(let i=0;i<170;i++) stars.push({fx:Math.random(),fy:Math.random(),r:Math.random()*1.3+0.3,a:Math.random()*0.5+0.3});
-  layerDirty=true;
-}
-addEventListener('resize',fit);
-addEventListener('orientationchange',function(){ fit(); setTimeout(fit,300); setTimeout(fit,800); });
-if(window.visualViewport) visualViewport.addEventListener('resize',fit);
-fit();
+const ZMIN=1, ZMAX=5, DMIN=1.32, DMAX=3.5;
+function camDist(){ return DMAX-(zoom-ZMIN)/(ZMAX-ZMIN)*(DMAX-DMIN); }
 
-function buildGlobeLayer(){
-  const Rv=R();
-  let GL=Math.round(Math.min(W,H)*0.92*zoom);
-  const cap=isMobile?430:580;
-  if(GL>cap) GL=cap;
-  if(GL<200) GL=200;
-  const key=GL.toFixed(0)+'|'+yaw.toFixed(4)+'|'+pitch.toFixed(4);
-  if(!layerDirty && key===layerKey) return;
-  layerDirty=false; layerKey=key;
-
-  globeLayer.width=GL; globeLayer.height=GL;
-  const img=gctx.createImageData(GL,GL);
-  const d=img.data;
-  const cP=Math.cos(pitch), sP=Math.sin(pitch), cY=Math.cos(yaw), sY=Math.sin(yaw);
-  const invW=360/TEX_W, invH=180/TEX_H;
-  for(let py=0;py<GL;py++){
-    const ny=(0.5-(py+0.5)/GL)*2;
-    const row=py*GL;
-    for(let px=0;px<GL;px++){
-      const nx=((px+0.5)/GL-0.5)*2;
-      const r2=nx*nx+ny*ny;
-      if(r2>1) continue;
-      const nz=Math.sqrt(1-r2);
-      const w=toWorld(nx,ny,nz,cP,sP,cY,sY);
-      const lat=90-Math.acos(Math.max(-1,Math.min(1,w.y)))*180/Math.PI;
-      let lng=Math.atan2(w.z,-w.x)*180/Math.PI-180;
-      lng=((lng+540)%360)-180;
-      let tx=((lng+180)*invW)|0; if(tx<0)tx=0; if(tx>=TEX_W)tx=TEX_W-1;
-      let ty=((90-lat)*invH)|0;  if(ty<0)ty=0; if(ty>=TEX_H)ty=TEX_H-1;
-      const si=(ty*TEX_W+tx)*4, di=(row+px)*4;
-      const shade=0.62+0.38*nz; // limb darkening = round look
-      d[di]=texData[si]*shade;
-      d[di+1]=texData[si+1]*shade;
-      d[di+2]=texData[si+2]*shade;
-      d[di+3]=255;
-    }
-  }
-  gctx.putImageData(img,0,0);
-  void Rv;
-}
-
-function projVec(v){ // world vector (any length) -> screen pos {x,y,vis}
-  const cP=Math.cos(pitch), sP=Math.sin(pitch), cY=Math.cos(yaw), sY=Math.sin(yaw);
-  const l=toLocal(v.x,v.y,v.z,cP,sP,cY,sY);
-  const Rv=R();
-  return { x:cx()+l.x*Rv, y:cy0()-l.y*Rv, vis:l.z>0.015, z:l.z };
-}
+const _ray=new THREE.Raycaster(), _ndc=new THREE.Vector2();
 function screenToLL(px,py){
-  const Rv=R();
-  const nx=(px-cx())/Rv, ny=(cy0()-py)/Rv;
-  const r2=nx*nx+ny*ny;
-  if(r2>1) return null;
-  const nz=Math.sqrt(1-r2);
-  const cP=Math.cos(pitch), sP=Math.sin(pitch), cY=Math.cos(yaw), sY=Math.sin(yaw);
-  const w=toWorld(nx,ny,nz,cP,sP,cY,sY);
-  return v2ll(w);
+  _ndc.x=(px/W)*2-1; _ndc.y=-(py/H)*2+1;
+  _ray.setFromCamera(_ndc,camera);
+  const hit=_ray.intersectObject(earthMesh)[0];
+  if(!hit) return null;
+  return v2ll({x:hit.point.x/EARTH_R,y:hit.point.y/EARTH_R,z:hit.point.z/EARTH_R});
 }
 
-/* ---------------- MARKERS / LINES / FLIGHTS ---------------- */
-let meLoc=null, meScr=null, relocPending=null, relocScr=null;
-const friendCurves={}; // linkId -> {pts:[worldVec...], loc}
+/* ---------------- markers / routes / flights ---------------- */
+let meLoc=null, relocPending=null;
+const friendCurves={}; // linkId -> {pts:[unitVec...], loc}
+const markerGroup=new THREE.Group(), routeGroup=new THREE.Group();
+scene.add(markerGroup); scene.add(routeGroup);
+
+function makeCircleTexture(){
+  const c=document.createElement('canvas'); c.width=64;c.height=64;
+  const fx=c.getContext('2d');
+  const g=fx.createRadialGradient(32,32,0,32,32,30);
+  g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.6,'rgba(255,255,255,0.9)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  fx.fillStyle=g; fx.beginPath(); fx.arc(32,32,30,0,Math.PI*2); fx.fill();
+  return new THREE.CanvasTexture(c);
+}
+function makeRingTexture(){
+  const c=document.createElement('canvas'); c.width=64;c.height=64;
+  const fx=c.getContext('2d');
+  fx.strokeStyle='#fff'; fx.lineWidth=5;
+  fx.beginPath(); fx.arc(32,32,24,0,Math.PI*2); fx.stroke();
+  return new THREE.CanvasTexture(c);
+}
+function makeEmojiTexture(emoji,size){
+  const c=document.createElement('canvas'); c.width=size;c.height=size;
+  const fx=c.getContext('2d');
+  fx.font=(size*0.8)+'px serif'; fx.textAlign='center'; fx.textBaseline='middle';
+  fx.fillText(emoji,size/2,size/2+2);
+  return new THREE.CanvasTexture(c);
+}
+const circleTex=makeCircleTexture(), ringTex=makeRingTexture(), pigeonTex=makeEmojiTexture('🕊️',96);
+const friendLineMat=new THREE.LineDashedMaterial({color:0x58a6ff,dashSize:0.05,gapSize:0.035,transparent:true,opacity:0.6});
+const flightLineMat=new THREE.LineDashedMaterial({color:0xffc857,dashSize:0.06,gapSize:0.04,transparent:true,opacity:0.9});
+
+function addMarker(lat,lng,colorHex){
+  const v=ll2v(lat,lng), r=EARTH_R*1.012;
+  const core=new THREE.Sprite(new THREE.SpriteMaterial({map:circleTex,color:colorHex,depthWrite:false}));
+  core.position.set(v.x*r,v.y*r,v.z*r); core.scale.set(0.045,0.045,1);
+  markerGroup.add(core);
+  const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:ringTex,color:colorHex,transparent:true,depthWrite:false}));
+  halo.position.copy(core.position); halo.userData.isHalo=true;
+  markerGroup.add(halo);
+}
+function clearGroup(g){ while(g.children.length){ const o=g.children.pop(); if(o.geometry)o.geometry.dispose(); if(o.material)o.material.dispose(); } }
+function rebuildSceneObjects(){
+  clearGroup(markerGroup); clearGroup(routeGroup);
+  Object.keys(links).forEach(function(id){
+    const fc=friendCurves[id];
+    if(!fc) return;
+    if(meLoc){
+      const pts3=fc.pts.map(function(p){ return new THREE.Vector3(p.x*EARTH_R,p.y*EARTH_R,p.z*EARTH_R); });
+      const geo=new THREE.BufferGeometry().setFromPoints(pts3);
+      const line=new THREE.Line(geo, friendLineMat.clone());
+      line.computeLineDistances();
+      routeGroup.add(line);
+    }
+    addMarker(fc.loc.lat, fc.loc.lng, 0x58a6ff);
+  });
+  if(meLoc) addMarker(meLoc.lat, meLoc.lng, 0x3fb950);
+  if(relocPending) addMarker(relocPending.lat, relocPending.lng, 0xd29922);
+  sceneDirty=false;
+}
 
 function slerp(a,b,t){
   let dot=a.x*b.x+a.y*b.y+a.z*b.z;
@@ -424,76 +352,53 @@ function curvePoints(aLL,bLL,n,altK){
   const alt=Math.max(0.05,ang*0.35)*(altK||1);
   const pts=[];
   for(let i=0;i<=n;i++){
-    const t=i/n;
-    const v=slerp(a,b,t);
-    const s=1+Math.sin(Math.PI*t)*alt;
+    const t=i/n, v=slerp(a,b,t), s=1+Math.sin(Math.PI*t)*alt;
     pts.push({x:v.x*s,y:v.y*s,z:v.z*s});
   }
   return pts;
 }
 
-let flights={}; // key -> {pts,start,dur,onDone,done}
+let flights={}; // key -> {pts,start,dur,onDone,done,line,sprite}
 function flyPigeon(aLL,bLL,onDone,key){
   key=key||'self';
   focusOnRoute(aLL,bLL);
-  flights[key]={ pts:curvePoints(aLL,bLL,72,1.4), start:performance.now(),
-                 dur:flightDur(aLL,bLL), onDone:onDone, done:false };
+  const pts=curvePoints(aLL,bLL,72,1.4);
+  const pts3=pts.map(function(p){ return new THREE.Vector3(p.x*EARTH_R,p.y*EARTH_R,p.z*EARTH_R); });
+  const geo=new THREE.BufferGeometry().setFromPoints(pts3);
+  const line=new THREE.Line(geo, flightLineMat.clone());
+  line.computeLineDistances();
+  scene.add(line);
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:pigeonTex,transparent:true,depthWrite:false}));
+  sprite.scale.set(0.14,0.14,1);
+  scene.add(sprite);
+  flights[key]={ pts:pts, start:performance.now(), dur:flightDur(aLL,bLL), onDone:onDone, done:false, line:line, sprite:sprite };
 }
 function flightDur(a,b){
   const d=hav(a,b), hrs=d/80;
   return Math.min(150000,Math.max(8000,hrs*1000));
 }
-
 function focusOnRoute(a,b){
   const va=ll2v(a.lat,a.lng), vb=ll2v(b.lat,b.lng);
   const mid={x:va.x+vb.x,y:va.y+vb.y,z:va.z+vb.z};
   const len=Math.sqrt(mid.x*mid.x+mid.y*mid.y+mid.z*mid.z);
   const m = len<1e-6 ? va : {x:mid.x/len,y:mid.y/len,z:mid.z/len};
   const cLL=v2ll(m);
-  targetYaw=-(cLL.lng+180)*Math.PI/180+Math.PI; // face the midpoint
+  targetYaw=-(cLL.lng+180)*Math.PI/180+Math.PI; // frame the midpoint of the route
   targetPitch=cLL.lat*Math.PI/180*0.9;
   let dot=Math.max(-1,Math.min(1,va.x*vb.x+va.y*vb.y+va.z*vb.z));
   const ang=Math.acos(dot);
-  targetZoom=Math.max(1,Math.min(3.2,0.85/Math.max(0.28,Math.sin(ang*0.45))));
-}
-function dAng(a,b){ let d=(b-a)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
-
-function drawMarker(scr,color,t){
-  if(!scr.vis) return;
-  ctx.beginPath(); ctx.arc(scr.x,scr.y,5,0,Math.PI*2);
-  ctx.fillStyle=color; ctx.fill();
-  ctx.lineWidth=2; ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.stroke();
-  const pr=7+((t/600)%1)*10;
-  ctx.beginPath(); ctx.arc(scr.x,scr.y,pr,0,Math.PI*2);
-  ctx.strokeStyle=color; ctx.globalAlpha=1-((t/600)%1); ctx.lineWidth=1.5; ctx.stroke();
-  ctx.globalAlpha=1;
-}
-function drawPolyline(pts,color,dash,width){
-  ctx.strokeStyle=color; ctx.lineWidth=width||1.5;
-  ctx.setLineDash(dash||[]);
-  ctx.beginPath();
-  let started=false, prevVis=false;
-  for(let i=0;i<pts.length;i++){
-    const s=projVec(pts[i]);
-    if(s.vis){
-      if(!started||!prevVis){ ctx.moveTo(s.x,s.y); started=true; }
-      else ctx.lineTo(s.x,s.y);
-      prevVis=true;
-    } else prevVis=false;
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
+  targetZoom=Math.max(1,Math.min(3.4,0.85/Math.max(0.28,Math.sin(ang*0.45))));
 }
 
-/* ---------------- INPUT ---------------- */
-function onDown(x,y){ dragging=true; prevX=x; prevY=y; downX=x; downY=y; targetYaw=null; globeDiv.classList.add('dragging'); }
+/* ---------------- input: drag / wheel / pinch — fast, with flick momentum ---------------- */
+function onDown(x,y){ dragging=true; prevX=x; prevY=y; downX=x; downY=y; targetYaw=null; velYaw=0; velPitch=0; globeDiv.classList.add('dragging'); }
 function onMove(x,y){
   if(!dragging) return;
-  const dx=(x-prevX)*0.006, dy=(y-prevY)*0.006;
-  yaw+=dx;
-  pitch+=dy;
-  if(pitch>1.25)pitch=1.25; if(pitch<-1.25)pitch=-1.25;
-  prevX=x; prevY=y; layerDirty=true;
+  const dx=(x-prevX)*0.009, dy=(y-prevY)*0.009;
+  yaw+=dx; pitch+=dy;
+  if(pitch>1.3)pitch=1.3; if(pitch<-1.3)pitch=-1.3;
+  velYaw=dx; velPitch=dy;
+  prevX=x; prevY=y;
 }
 function onUp(x,y){
   dragging=false; globeDiv.classList.remove('dragging');
@@ -507,19 +412,15 @@ cv.addEventListener('touchstart',function(e){ if(e.touches.length===1)onDown(e.t
 cv.addEventListener('touchmove',function(e){ if(e.touches.length===1)onMove(e.touches[0].clientX,e.touches[0].clientY); if(e.touches.length===2)pinchMove(e); },{passive:true});
 cv.addEventListener('touchend',function(e){ const t=e.changedTouches[0]; onUp(t?t.clientX:null,t?t.clientY:null); });
 
-cv.addEventListener('wheel',function(e){
-  e.preventDefault();
-  zoom=Math.max(1,Math.min(5,zoom*(1+e.deltaY*0.001)));
-  targetZoom=null; layerDirty=true;
-},{passive:false});
-document.getElementById('zoomIn').addEventListener('click',function(){ zoom=Math.min(5,zoom*1.3); targetZoom=null; layerDirty=true; });
-document.getElementById('zoomOut').addEventListener('click',function(){ zoom=Math.max(1,zoom/1.3); targetZoom=null; layerDirty=true; });
+cv.addEventListener('wheel',function(e){ e.preventDefault(); zoom=Math.max(ZMIN,Math.min(ZMAX,zoom*(1+e.deltaY*0.001))); targetZoom=null; },{passive:false});
+document.getElementById('zoomIn').addEventListener('click',function(){ zoom=Math.min(ZMAX,zoom*1.3); targetZoom=null; });
+document.getElementById('zoomOut').addEventListener('click',function(){ zoom=Math.max(ZMIN,zoom/1.3); targetZoom=null; });
 
 let pinchD0=0, pinchZ0=1;
 function pinchStart(e){ pinchD0=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); pinchZ0=zoom; }
 function pinchMove(e){
   const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
-  if(pinchD0>0){ zoom=Math.max(1,Math.min(5,pinchZ0*pinchD0/d)); layerDirty=true; }
+  if(pinchD0>0){ zoom=Math.max(ZMIN,Math.min(ZMAX,pinchZ0*pinchD0/d)); targetZoom=null; }
 }
 
 function trySelect(px,py){
@@ -527,88 +428,77 @@ function trySelect(px,py){
   const ll=screenToLL(px,py);
   if(!ll) return;
   if(changingLocation){
-    relocPending=ll; relocScr=null;
+    relocPending=ll; sceneDirty=true;
     document.getElementById('relocConfirm').disabled=false;
     log('📍 New spot: '+ll.lat.toFixed(2)+', '+ll.lng.toFixed(2)+' — press Confirm to move.');
     return;
   }
-  pendingLoc=ll;
-  meLoc=ll; // preview marker
+  pendingLoc=ll; meLoc=ll; sceneDirty=true;
   document.getElementById('regBtn').disabled=!document.getElementById('name').value.trim();
   log('📍 Loft pinned: '+ll.lat.toFixed(2)+', '+ll.lng.toFixed(2));
 }
 
-/* ---------------- RENDER LOOP ---------------- */
-function frame(t){
-  requestAnimationFrame(frame);
+/* ---------------- render loop ---------------- */
+function updateCamera(){
   if(targetYaw!==null && !dragging){
-    yaw+=dAng(yaw,targetYaw)*0.07;
-    pitch+=(targetPitch-pitch)*0.07;
-    zoom+=(targetZoom-zoom)*0.07;
-    layerDirty=true;
-    if(Math.abs(dAng(yaw,targetYaw))<0.002 && Math.abs(pitch-targetPitch)<0.002 && Math.abs(zoom-targetZoom)<0.01){
-      targetYaw=null;
+    yaw+=dAng(yaw,targetYaw)*0.08;
+    pitch+=(targetPitch-pitch)*0.08;
+    zoom+=(targetZoom-zoom)*0.08;
+    if(Math.abs(dAng(yaw,targetYaw))<0.002 && Math.abs(pitch-targetPitch)<0.002 && Math.abs(zoom-targetZoom)<0.01) targetYaw=null;
+  } else if(!dragging){
+    if(Math.abs(velYaw)>0.00025 || Math.abs(velPitch)>0.00025){
+      yaw+=velYaw; pitch+=velPitch;
+      if(pitch>1.3)pitch=1.3; if(pitch<-1.3)pitch=-1.3;
+      velYaw*=0.945; velPitch*=0.945; // momentum decay after a flick
+    } else {
+      yaw+=0.0009; // gentle idle spin
     }
-  } else if(!dragging && targetYaw===null){
-    yaw+=0.00055; layerDirty=true;
   }
-
-  // background
-  ctx.fillStyle='#050810'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#ffffff';
-  stars.forEach(function(s){ ctx.globalAlpha=s.a; ctx.beginPath(); ctx.arc(s.fx*W,s.fy*H,s.r,0,Math.PI*2); ctx.fill(); });
-  ctx.globalAlpha=1;
-
-  buildGlobeLayer();
-  const Rv=R();
-  const GL=globeLayer.width;
-  ctx.imageSmoothingEnabled=true;
-  ctx.drawImage(globeLayer, cx()-Rv, cy0()-Rv, Rv*2, Rv*2);
-
-  // atmosphere glow
-  const g=ctx.createRadialGradient(cx(),cy0(),Rv*0.95,cx(),cy0(),Rv*1.22);
-  g.addColorStop(0,'rgba(59,130,246,0)');
-  g.addColorStop(0.55,'rgba(59,130,246,0.22)');
-  g.addColorStop(1,'rgba(59,130,246,0)');
-  ctx.fillStyle=g;
-  ctx.beginPath(); ctx.arc(cx(),cy0(),Rv*1.25,0,Math.PI*2); ctx.fill();
-
-  // friend curves + markers
-  Object.keys(links).forEach(function(id){
-    const fc=friendCurves[id];
-    if(!fc) return;
-    if(meLoc) drawPolyline(fc.pts,'rgba(88,166,255,0.55)',[5,4],1.5);
-    drawMarker(projVec(ll2v(fc.loc.lat,fc.loc.lng)),'#58a6ff',t);
+  const d=camDist();
+  camera.position.set(d*Math.cos(pitch)*Math.sin(yaw), d*Math.sin(pitch), d*Math.cos(pitch)*Math.cos(yaw));
+  camera.lookAt(0,0,0);
+}
+function updateHalos(t){
+  markerGroup.children.forEach(function(m){
+    if(m.userData.isHalo){
+      const cyc=(t/900)%1;
+      const s=0.05+cyc*0.09;
+      m.scale.set(s,s,1);
+      m.material.opacity=1-cyc;
+    }
   });
-  if(meLoc) drawMarker(projVec(ll2v(meLoc.lat,meLoc.lng)),'#3fb950',t);
-  if(relocPending) drawMarker(projVec(ll2v(relocPending.lat,relocPending.lng)),'#d29922',t);
-
-  // flights
+}
+function updateFlights(t){
   Object.keys(flights).forEach(function(key){
     const f=flights[key];
     if(!f||f.done) return;
     const p=Math.min((t-f.start)/f.dur,1);
-    drawPolyline(f.pts,'rgba(255,200,87,0.9)',[6,5],2);
     const idx=Math.min(f.pts.length-1, Math.floor(p*(f.pts.length-1)));
-    const s=projVec(f.pts[idx]);
-    if(s.vis){
-      ctx.font=(20+8*zoom)+'px serif';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('🕊️',s.x,s.y-14);
-    }
+    const pt=f.pts[idx];
+    f.sprite.position.set(pt.x*EARTH_R,pt.y*EARTH_R,pt.z*EARTH_R);
     if(key===selectedTargetId || Object.keys(flights).length===1)
       document.getElementById('stProg').textContent=Math.floor(p*100)+'%';
     if(p>=1){
       f.done=true;
+      scene.remove(f.line); f.line.geometry.dispose(); f.line.material.dispose();
+      scene.remove(f.sprite); f.sprite.material.dispose();
       log('🐦 Pigeon landed safely'+(links[key]?" at "+links[key].name+"'s loft":'')+'.');
       if(f.onDone) f.onDone();
       delete flights[key];
     }
   });
 }
+function frame(t){
+  requestAnimationFrame(frame);
+  updateCamera();
+  if(sceneDirty) rebuildSceneObjects();
+  updateHalos(t);
+  updateFlights(t);
+  renderer.render(scene,camera);
+}
 requestAnimationFrame(frame);
 
-/* ---------------- STATE / CHAT LOGIC (same as before) ---------------- */
+/* ---------------- STATE / CHAT LOGIC (unchanged) ---------------- */
 let me=null, pendingLoc=null, connected=false, acceptNew=true, peer=null;
 let links={};
 let linkSeq=0;
@@ -658,7 +548,7 @@ document.getElementById('changeLocBtn').addEventListener('click',function(){
   log('📍 Tap your new loft location on the globe.');
 });
 document.getElementById('relocCancel').addEventListener('click',function(){
-  changingLocation=false; relocPending=null;
+  changingLocation=false; relocPending=null; sceneDirty=true;
   document.getElementById('relocateCard').classList.add('hidden');
 });
 document.getElementById('relocConfirm').addEventListener('click',function(){
@@ -686,6 +576,7 @@ function removeLink(id){
   log('⚠️ '+links[id].name+' disconnected.');
   delete links[id];
   delete friendCurves[id];
+  sceneDirty=true;
   if(selectedTargetId===id) selectedTargetId=null;
   refreshFriendsUI();
 }
@@ -693,6 +584,7 @@ function updateFriendCurves(){
   Object.keys(links).forEach(function(id){
     friendCurves[id]={ loc:links[id].loc, pts:(me?curvePoints(me.loc,links[id].loc,60,0.35):[]) };
   });
+  sceneDirty=true;
 }
 function refreshFriendsUI(){
   const ids=Object.keys(links), has=ids.length>0;
@@ -830,8 +722,9 @@ function handleAck(m){
 }
 
 if(innerWidth>768) document.getElementById('panel').classList.remove('closed');
-log('🐦 Pigeon Post ready — globe rendered 100% offline. Drag, zoom, tap your loft!');
+log('🐦 Pigeon Post ready — WebGL globe online. Drag it (flick for momentum), zoom, tap your loft!');
 if(typeof Peer==='undefined') log('⚠️ P2P library blocked — map still works; messaging needs internet.');
+if(typeof THREE==='undefined') log('⚠️ 3D library blocked — the globe cannot render without internet access to unpkg.com.');
 </script>
 </body>
 </html>
