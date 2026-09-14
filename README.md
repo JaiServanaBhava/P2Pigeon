@@ -9,7 +9,7 @@
 <br>
 
 <a href="YOUR_WEBSITE_LINK">
-<img src="https://img.shields.io/badge/🌍%20LIVE%20WEBSITE-Visit%20P2Pigeon-238636?style=for-the-badge&logo=googlechrome&logoColor=white">
+<img src="https://jaiservanabhava.github.io/P2Pigeon/">
 </a>
 
 <a href="YOUR_GITHUB_LINK">
@@ -615,7 +615,7 @@ RELEASE
 <br>
 
 <a href="YOUR_WEBSITE_LINK">
-<img src="https://img.shields.io/badge/🚀%20LAUNCH%20P2PIGEON-Visit%20Website-238636?style=for-the-badge">
+<img src="https://jaiservanabhava.github.io/P2Pigeon/">
 </a>
 
 <br><br>
